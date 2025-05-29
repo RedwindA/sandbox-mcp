@@ -17,8 +17,8 @@ An MCP server that provides isolated Docker environments for code execution. Thi
 
 1. Clone this repository:
 ```bash
-git clone <your-repo-url>
-cd sandbox_server
+git clone https://github.com/RedwindA/sandbox-mcp
+cd sandbox-mcp
 ```
 
 2. Create and activate a virtual environment with uv:
