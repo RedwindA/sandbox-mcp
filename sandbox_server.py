@@ -17,25 +17,34 @@ class SandboxServer:
     
     def _register_tools(self):
         @self.mcp.tool()
-        async def create_container_environment(image: str, persist: bool) -> str:
+        async def create_container_environment(image: str, persist: bool, host_workspace_path: Optional[str] = None) -> str:
             """Create a new container with the specified base image.
             
             Args:
                 image: Docker image to use (e.g., python:3.9-slim, ubuntu:latest)
+                persist: Whether to persist the container after it exits.
+                host_workspace_path: Optional path on the host to bind mount to /workspace in the container. If None, a temporary directory will be created.
             
             Returns:
                 Container ID of the new container
             """
             try:
-                # Create a temporary directory for file mounting
-                temp_dir = tempfile.mkdtemp()
+                is_temp_dir = False
+                if host_workspace_path:
+                    # Ensure the user-provided path exists
+                    Path(host_workspace_path).mkdir(parents=True, exist_ok=True)
+                    mount_path = host_workspace_path
+                else:
+                    # Create a temporary directory for file mounting
+                    mount_path = tempfile.mkdtemp()
+                    is_temp_dir = True
                 
-                # Create container with the temp directory mounted
+                # Create container with the mount_path directory mounted
                 container = self.docker_client.containers.run(
                     image=image,
                     command="tail -f /dev/null",  # Keep container running
                     volumes={
-                        temp_dir: {
+                        mount_path: {
                             'bind': '/workspace',
                             'mode': 'rw'
                         }
@@ -47,7 +56,8 @@ class SandboxServer:
                 
                 # Store container info
                 self.containers[container.id] = {
-                    'temp_dir': temp_dir,
+                    'mount_path': mount_path,
+                    'is_temp_dir': is_temp_dir,
                     'files': {}
                 }
                 
@@ -77,10 +87,10 @@ Container is ready for commands"""
                 
             try:
                 container_info = self.containers[container_id]
-                temp_dir = container_info['temp_dir']
+                mount_path = container_info['mount_path']
                 
                 # Create file in the mounted directory
-                file_path = Path(temp_dir) / filename
+                file_path = Path(mount_path) / filename
                 with open(file_path, 'w') as f:
                     f.write(content)
                 
@@ -217,13 +227,13 @@ To use this Dockerfile:
                 # Remove container and cleanup
                 container.remove(force=force)
                 
-                # Clean up temp directory if it exists
-                if 'temp_dir' in container_info:
+                # Clean up temp directory if it exists and was temporary
+                if container_info.get('is_temp_dir') and 'mount_path' in container_info:
                     try:
                         import shutil
-                        shutil.rmtree(container_info['temp_dir'])
+                        shutil.rmtree(container_info['mount_path'])
                     except Exception as e:
-                        print(f"Warning: Failed to remove temp directory: {str(e)}")
+                        print(f"Warning: Failed to remove temp directory: {container_info['mount_path']}: {str(e)}")
                 
                 # Remove from our tracking
                 if container_id in self.containers:
