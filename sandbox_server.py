@@ -4,6 +4,9 @@ import tempfile
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
+import requests
+from urllib.parse import urlparse
+import re
 
 class SandboxServer:
     def __init__(self):
@@ -17,16 +20,17 @@ class SandboxServer:
     
     def _register_tools(self):
         @self.mcp.tool()
-        async def create_container_environment(image: str, persist: bool, host_workspace_path: Optional[str] = None) -> str:
-            """Create a new container with the specified base image.
+        async def create_container_environment(image: str, persist: bool, host_workspace_path: Optional[str] = None, download_url: Optional[str] = None) -> str:
+            """Create a new container with the specified base image. Optionally download a file into its workspace.
             
             Args:
                 image: Docker image to use (e.g., python:3.9-slim, ubuntu:latest)
                 persist: Whether to persist the container after it exits.
                 host_workspace_path: Optional path on the host to bind mount to /workspace in the container. If None, a temporary directory will be created.
+                download_url: Optional URL of a file to download into the /workspace directory upon creation.
             
             Returns:
-                Container ID of the new container
+                Container ID of the new container and status of file download if attempted.
             """
             try:
                 is_temp_dir = False
@@ -61,9 +65,53 @@ class SandboxServer:
                     'files': {}
                 }
                 
-                return f"""Container created with ID: {container.id}
+                downloaded_filename = None
+                download_status_message = ""
+
+                if download_url:
+                    try:
+                        # Attempt to download the file from the URL
+                        response = requests.get(download_url, stream=True, timeout=30) # Added timeout
+                        response.raise_for_status()  # Raise an exception for bad status codes
+                        
+                        # Determine filename
+                        parsed_url = urlparse(download_url)
+                        filename_from_url = os.path.basename(parsed_url.path)
+                        
+                        # Try to get filename from Content-Disposition header if not in URL path
+                        if not filename_from_url:
+                            content_disposition = response.headers.get('content-disposition')
+                            if content_disposition:
+                                # Regex to find filename in content-disposition header
+                                # Handles cases like: filename="example.txt" or filename=example.txt
+                                fname_match = re.search(r'filename="?([^"]+)"?', content_disposition)
+                                if fname_match:
+                                    filename_from_url = fname_match.group(1).strip("'\"") # Strip quotes
+
+                        if not filename_from_url:  # Fallback filename if still not found
+                            filename_from_url = "downloaded_file"
+
+                        downloaded_filepath = Path(mount_path) / filename_from_url
+                        
+                        with open(downloaded_filepath, 'wb') as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                        downloaded_filename = filename_from_url
+                        download_status_message = f"\nFile '{downloaded_filename}' downloaded to /workspace."
+                        
+                    except requests.exceptions.Timeout:
+                        download_status_message = f"\nFailed to download file from {download_url}: Timeout."
+                    except requests.exceptions.RequestException as e:
+                        download_status_message = f"\nFailed to download file from {download_url}: {str(e)}."
+                    except Exception as e:  # Catch any other unforeseen errors during download
+                        download_status_message = f"\nError processing download for {download_url}: {str(e)}."
+
+                return_message = f"""Container created with ID: {container.id}
 Working directory is /workspace
 Container is ready for commands"""
+                return_message += download_status_message
+                
+                return return_message
                 
             except docker.errors.ImageNotFound:
                 return f"Error: Image {image} not found. Please verify the image name."
