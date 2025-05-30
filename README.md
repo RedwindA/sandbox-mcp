@@ -5,13 +5,14 @@ An MCP server that provides isolated Docker environments for code execution. Thi
 - Write and execute code in multiple programming languages
 - Install packages and set up development environments
 - Run commands in isolated containers
+- Download files directly into containers during creation
+- Mount host directories for persistent storage
 
 ## Prerequisites
 
 - Python 3.9 or higher
 - Docker installed and running
 - uv package manager (recommended)
-- Docker MCP server (recommended)
 
 ## Installation
 
@@ -85,6 +86,22 @@ Could you create a C program that calculates the fibonacci sequence and run it?
 Could you create a Python script that uses numpy to generate and plot some random data?
 ```
 
+### Advanced Features
+
+#### Download Files During Container Creation
+
+You can download files directly into the container workspace during creation:
+```
+Create a Python container and download the dataset from https://example.com/data.csv
+```
+
+#### Mount Host Directories
+
+Mount a specific host directory to persist data between sessions:
+```
+Create a container with the host directory /path/to/my/project mounted as workspace
+```
+
 ### Saving and Reproducing Environments
 
 The server provides several ways to save and reproduce your development environments:
@@ -100,11 +117,6 @@ This will create a container that:
 - Stays running after Claude Desktop closes
 - Can be accessed directly through Docker
 - Preserves all installed packages and files
-
-The server will provide instructions for:
-- Accessing the container directly (`docker exec`)
-- Stopping and starting the container
-- Removing it when no longer needed
 
 #### Saving Container State
 
@@ -143,18 +155,31 @@ You can use this Dockerfile to:
 3. Modify and customize the build process
 4. Deploy to different systems
 
+#### Container Cleanup
+
+When you're done with a container, clean it up:
+```
+Could you exit and clean up the container?
+```
+
+This will:
+- Stop the container gracefully
+- Remove the container
+- Clean up temporary directories if created
+- Remove from tracking
+
 #### Recommended Workflow
 
 For reproducible development environments:
 
-1. Create a persistent container:
+1. Create a persistent container with file download:
 ```
-Create a persistent Python container for data science work
+Create a persistent Python container and download requirements.txt from my repository
 ```
 
-2. Install needed packages and set up the environment:
+2. Install needed packages:
 ```
-Install numpy, pandas, and scikit-learn in the container
+Install the packages listed in requirements.txt
 ```
 
 3. Test your setup:
@@ -172,6 +197,11 @@ Save this container as 'ds-workspace:v1'
 Generate a Dockerfile for this environment
 ```
 
+6. Clean up when done:
+```
+Exit and clean up the container
+```
+
 This gives you multiple options for recreating your environment:
 - Use the saved Docker image directly
 - Build from the Dockerfile with modifications
@@ -180,9 +210,10 @@ This gives you multiple options for recreating your environment:
 ## Security Notes
 
 - All code executes in isolated Docker containers
-- Containers are automatically removed after use
+- Containers can be automatically removed after use (when persist=False)
 - File systems are isolated between containers
-- Host system access is restricted
+- Host system access is restricted to mounted directories only
+- Downloads are performed with timeout protection
 
 ## Project Structure
 
@@ -190,18 +221,47 @@ This gives you multiple options for recreating your environment:
 sandbox_server/
 ├── sandbox_server.py     # Main server implementation
 ├── pyproject.toml        # Project configuration
-└── README.md            # This file
+├── README.md            # This file
+├── .gitignore           # Git ignore patterns
+├── .python-version      # Python version specification
+└── uv.lock             # UV lock file
 ```
 
 ## Available Tools
 
-The server provides three main tools:
+The server provides six main tools:
 
-1. `create_container_environment`: Creates a new Docker container with specified image
-2. `create_file_in_container`: Creates a file in a container
-3. `execute_command_in_container`: Runs commands in a container
-4. `save_container_state`: Saves the container state to a persistent container
-5. `export_dockerfile`: exports a docker file to create a persistant environment
-6. `exit_container`: closes a container to cleanup environment when finished
+1. **`create_container_environment`**: Creates a new Docker container with specified image
+   - Parameters: `image`, `persist`, `host_workspace_path` (optional), `download_url` (optional)
+   - Creates containers with optional file downloads and host directory mounting
 
+2. **`create_file_in_container`**: Creates a file in a container
+   - Parameters: `container_id`, `filename`, `content`
+   - Files are created in the `/workspace` directory
 
+3. **`execute_command_in_container`**: Runs commands in a container
+   - Parameters: `container_id`, `command`
+   - Executes in `/workspace` with non-interactive environment
+
+4. **`save_container_state`**: Saves the container state as a Docker image
+   - Parameters: `container_id`, `name`
+   - Creates a reusable Docker image from current container state
+
+5. **`export_dockerfile`**: Generates a Dockerfile to recreate the environment
+   - Parameters: `container_id`
+   - Exports a Dockerfile with base image and file copies
+
+6. **`exit_container`**: Stops and removes a running container
+   - Parameters: `container_id`, `force` (optional)
+   - Cleans up containers and temporary directories
+
+## Error Handling
+
+The server includes robust error handling for:
+- Missing Docker images
+- Network timeouts during downloads
+- Container not found scenarios
+- File system operations
+- Docker daemon connectivity issues
+
+Each tool provides clear error messages to help diagnose and resolve issues.
